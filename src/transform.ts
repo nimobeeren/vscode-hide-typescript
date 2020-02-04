@@ -1,7 +1,10 @@
-import { transform as babelTransform } from "@babel/core";
+import { transformAsync as babelTransform } from "@babel/core";
+import pluginTransformTypeScript from "@babel/plugin-transform-typescript";
 
-export function transform(code: string) {
-  return babelTransform(code, {
-    plugins: ["@babel/plugin-transform-typescript"]
+export async function transform(code: string) {
+  const babelResult = await babelTransform(code, {
+    plugins: [pluginTransformTypeScript]
   });
+
+  return babelResult?.code;
 }
