@@ -10,19 +10,17 @@ export function activate(context: vscode.ExtensionContext) {
 
   const TransformedCodeProvider = class
     implements vscode.TextDocumentContentProvider {
-    async provideTextDocumentContent(/* uri: vscode.Uri */): Promise<string> {
+    async provideTextDocumentContent(): Promise<string> {
       // Get the source code from the active editor
       const { activeTextEditor } = vscode.window;
       if (!activeTextEditor) {
-        // TODO: some way to abort without throwing
-        throw new Error("Couldn't find an active editor");
+        throw new Error("Lost the active editor");
       }
       const input = activeTextEditor.document.getText();
 
       // Transform the code to regular JS
       const output = await transform(input);
       if (!output) {
-        // TODO: some way to abort without throwing
         throw new Error("Unable to transform code");
       }
       return output;
@@ -40,12 +38,23 @@ export function activate(context: vscode.ExtensionContext) {
 
 async function hideCommand() {
   const { activeTextEditor } = vscode.window;
-  const activeEditorTitle = activeTextEditor?.document.fileName;
+  if (!activeTextEditor) {
+    vscode.window.showErrorMessage("Couldn't find an active editor");
+    return;
+  }
+  const activeEditorTitle = activeTextEditor.document.fileName;
 
   // Get transformed code using our provider
   const path = `${activeEditorTitle} (transformed)`; // new editor title will equal this
   const uri = vscode.Uri.parse(`${myScheme}:${path}`, true);
-  const plainDocument = await vscode.workspace.openTextDocument(uri);
+  let plainDocument;
+  try {
+    plainDocument = await vscode.workspace.openTextDocument(uri);
+  } catch (e) {
+    const message = e.message || `Unknown error: ${e.toString()}`;
+    vscode.window.showErrorMessage(message);
+    return;
+  }
 
   // Set language to JS
   const jsDocument = await vscode.languages.setTextDocumentLanguage(
@@ -54,5 +63,5 @@ async function hideCommand() {
   );
 
   vscode.window.showTextDocument(jsDocument);
-  vscode.window.showInformationMessage("Transformed code"); // TODO: do something when it fails
+  vscode.window.showInformationMessage("Transformed code");
 }
