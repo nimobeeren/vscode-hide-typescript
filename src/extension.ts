@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { transform } from "./transform";
 
-const myScheme = "hide-typescript";
+const uriScheme = "hide-typescript";
 const transformedDocumentSuffix = " (transformed)";
 
 const watchingDocuments = new Set<vscode.TextDocument>();
@@ -10,6 +10,38 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("extension.hideTypeScript", hideTypeScript)
   );
+
+  vscode.workspace.onDidChangeTextDocument(async event => {
+    if (watchingDocuments.has(event.document)) {
+      // One of the documents we're watching has changed, so let's see if we can
+      // update the transformed document
+
+      /// Find the editor that contains the transformed document
+      const transformedDocumentName =
+        event.document.fileName + transformedDocumentSuffix;
+      const transformedDocumentEditor = findEditorByDocumentName(
+        transformedDocumentName
+      );
+
+      if (!transformedDocumentEditor) {
+        // Transformed document is not open anymore, so stop watching this document
+        watchingDocuments.delete(event.document);
+        return;
+      }
+
+      // Transform the changed document
+      let newTransformedDocument;
+      try {
+        newTransformedDocument = await getTransformedDocument(event.document);
+      } catch (e) {
+        const message = e.message || `Unknown error: ${e.toString()}`;
+        vscode.window.showErrorMessage(message);
+        return;
+      }
+
+      vscode.window.showTextDocument(newTransformedDocument);
+    }
+  });
 
   const TransformedCodeProvider = class
     implements vscode.TextDocumentContentProvider {
@@ -46,7 +78,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Register our provider to handle URIs with our scheme
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(
-      myScheme,
+      uriScheme,
       new TransformedCodeProvider()
     )
   );
@@ -58,14 +90,14 @@ function findEditorByDocumentName(name: string): vscode.TextEditor | undefined {
   });
 }
 
-async function getTransformedDoc(
+async function getTransformedDocument(
   sourceDocument: vscode.TextDocument
 ): Promise<vscode.TextDocument> {
   // Get transformed code using our provider
   // The URI path identifies the source document, but will also be the name
   // of the transformed document. Hence, we add a suffix to let the user distinguish them
   const path = `${sourceDocument.fileName}${transformedDocumentSuffix}`;
-  const uri = vscode.Uri.parse(`${myScheme}:${path}`, true);
+  const uri = vscode.Uri.parse(`${uriScheme}:${path}`, true);
   const plainDocument = await vscode.workspace.openTextDocument(uri);
 
   // Set language to JS
@@ -84,18 +116,18 @@ async function hideTypeScript() {
     return;
   }
 
-  const sourceDoc = activeTextEditor.document;
-  watchingDocuments.add(sourceDoc);
+  const sourceDocument = activeTextEditor.document;
+  watchingDocuments.add(sourceDocument);
 
-  let transformedDoc;
+  let transformedDocument;
   try {
-    transformedDoc = await getTransformedDoc(sourceDoc);
+    transformedDocument = await getTransformedDocument(sourceDocument);
   } catch (e) {
     const message = e.message || `Unknown error: ${e.toString()}`;
     vscode.window.showErrorMessage(message);
     return;
   }
 
-  vscode.window.showTextDocument(transformedDoc);
+  vscode.window.showTextDocument(transformedDocument);
   vscode.window.showInformationMessage("Transformed code");
 }
