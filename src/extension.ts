@@ -12,7 +12,6 @@ export function activate(context: vscode.ExtensionContext) {
     implements vscode.TextDocumentContentProvider {
     async provideTextDocumentContent(/* uri: vscode.Uri */): Promise<string> {
       return transformActiveEditor();
-      // TODO: make it understand that the output is JS code
       // TODO: set document title to something sensible
     }
   };
@@ -25,10 +24,15 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-function hideCommand() {
+async function hideCommand() {
   // Show the transformed code
   const uri = vscode.Uri.parse(`${myScheme}:active`, true); // the `active` part doesn't matter
-  vscode.window.showTextDocument(uri);
+  const plainDocument = await vscode.workspace.openTextDocument(uri);
+  const jsDocument = await vscode.languages.setTextDocumentLanguage(
+    plainDocument,
+    "javascript"
+  );
+  vscode.window.showTextDocument(jsDocument);
   vscode.window.showInformationMessage("Transformed code"); // TODO: do something when it fails
 }
 
