@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
+import { basename } from "path";
 import { transform } from "./transform";
 
 const uriScheme = "hide-typescript";
-const transformedDocumentSuffix = " (transformed)";
+const transformedSuffix = " (transformed)";
 
-const watchingDocuments = new Set<vscode.TextDocument>();
+// Maps a source document to an array of editors that contain the transformed document
+const watchingEditors = new Map<vscode.TextDocument, vscode.TextEditor[]>();
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
@@ -12,20 +14,18 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   vscode.workspace.onDidChangeTextDocument(async event => {
-    if (watchingDocuments.has(event.document)) {
+    if (watchingEditors.has(event.document)) {
       // One of the documents we're watching has changed, so let's see if we can
-      // update the transformed document
+      // update the transformed documents
 
-      /// Find the editor that contains the transformed document
+      /// Check if there is any editor containing the transformed document
       const transformedDocumentName =
-        event.document.fileName + transformedDocumentSuffix;
-      const transformedDocumentEditor = findEditorByDocumentName(
-        transformedDocumentName
-      );
+        event.document.fileName + transformedSuffix;
+      const anyEditor = !!findEditorByDocumentName(transformedDocumentName);
 
-      if (!transformedDocumentEditor) {
+      if (!anyEditor) {
         // Transformed document is not open anymore, so stop watching this document
-        watchingDocuments.delete(event.document);
+        watchingEditors.delete(event.document);
         return;
       }
 
@@ -38,8 +38,19 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(message);
         return;
       }
+      const newTransformedText = newTransformedDocument.getText();
 
-      vscode.window.showTextDocument(newTransformedDocument);
+      const editorsToUpdate = watchingEditors.get(event.document) || [];
+      editorsToUpdate.forEach(editor => {
+        editor.edit(editBuilder => {
+          // Replace whole document text with new text
+          const { lineCount } = editor.document;
+          const startPos = editor.document.lineAt(0).range.start;
+          const endPos = editor.document.lineAt(lineCount).range.end;
+          const wholeDocument = new vscode.Range(startPos, endPos);
+          editBuilder.replace(wholeDocument, newTransformedText);
+        });
+      });
     }
   });
 
@@ -48,7 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
     async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
       // Naively escape suffix string for use in regex
       // This will break when suffix contains symbols reserved by regex other than ) and (
-      const escapedSuffix = transformedDocumentSuffix
+      const escapedSuffix = transformedSuffix
         .replace("(", "\\(")
         .replace(")", "\\)");
 
@@ -86,7 +97,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 function findEditorByDocumentName(name: string): vscode.TextEditor | undefined {
   return vscode.window.visibleTextEditors.find(editor => {
-    return editor.document.fileName === name;
+    const filePath = editor.document.fileName;
+    return name === basename(filePath);
   });
 }
 
@@ -94,10 +106,11 @@ async function getTransformedDocument(
   sourceDocument: vscode.TextDocument
 ): Promise<vscode.TextDocument> {
   // Get transformed code using our provider
-  // The URI path identifies the source document, but will also be the name
-  // of the transformed document. Hence, we add a suffix to let the user distinguish them
-  const path = `${sourceDocument.fileName}${transformedDocumentSuffix}`;
-  const uri = vscode.Uri.parse(`${uriScheme}:${path}`, true);
+  // The URI path will be used by VS Code as the name of the transformed document
+  const filePath = sourceDocument.fileName;
+  const fileName = basename(filePath);
+  const uriPath = `${fileName}${transformedSuffix}`;
+  const uri = vscode.Uri.parse(`${uriScheme}:${uriPath}`, true);
   const plainDocument = await vscode.workspace.openTextDocument(uri);
 
   // Set language to JS
@@ -117,7 +130,6 @@ async function hideTypeScript() {
   }
 
   const sourceDocument = activeTextEditor.document;
-  watchingDocuments.add(sourceDocument);
 
   let transformedDocument;
   try {
@@ -128,6 +140,11 @@ async function hideTypeScript() {
     return;
   }
 
-  vscode.window.showTextDocument(transformedDocument);
+  // Open the transformed document in a new editor
+  const newEditor = await vscode.window.showTextDocument(transformedDocument);
   vscode.window.showInformationMessage("Transformed code");
+
+  // Add the new editor the the list of watching editors
+  const existingEditors = watchingEditors.get(sourceDocument) ?? [];
+  watchingEditors.set(sourceDocument, [...existingEditors, newEditor]);
 }
